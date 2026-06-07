@@ -1,50 +1,131 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: template (unratified) -> 1.0.0
+- Added principles:
+  - I. Evidence Before Claims
+  - II. Trustworthy Metrics
+  - III. Single Execution Path
+  - IV. Explicit State Ownership
+  - V. Incremental Refactoring
+  - VI. Verification Gates
+  - VII. Repository Safety
+- Added sections:
+  - Engineering Constraints
+  - Development Workflow
+  - Governance
+- Templates updated:
+  - ✅ .specify/templates/plan-template.md
+  - ✅ .specify/templates/spec-template.md
+  - ✅ .specify/templates/tasks-template.md
+- Templates reviewed without changes:
+  - ✅ .specify/templates/checklist-template.md
+  - ✅ .specify/templates/constitution-template.md
+- Command templates:
+  - ✅ No .specify/templates/commands directory is present
+- Runtime guidance reviewed:
+  - ✅ AGENTS.md
+  - ✅ README.md
+- Deferred items: none
+-->
+
+# FlashNovel Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Evidence Before Claims
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+All evaluation conclusions, README statements, and resume claims MUST be
+supported by reproducible data. The scope of each conclusion MUST match the
+scope of the experiment that produced it. Incomplete experiments MUST be
+labelled `partial`; partial results MUST NOT be presented as complete findings
+or as proof of an unverified improvement.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Trustworthy Metrics
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+Every metric MUST state its sample scope and denominator, data source,
+calculation method, applicable conditions, and known limitations. `dry-run`
+results MUST NOT count toward live-run success rates. Memory-write metrics MUST
+measure changes between pre-run and post-run state. Token usage, cost, and
+latency MUST come from actual model calls rather than estimates of substitute
+prompts.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Single Execution Path
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+Each Tool category MUST have one official runtime implementation, one
+registration entry point, and one behavioral test suite. A legacy
+implementation MAY remain temporarily during migration, but it MUST NOT also
+serve as an official execution path. The migration MUST document affected call
+sites, compatibility boundaries, and objective removal criteria.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. Explicit State Ownership
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Run-state transitions MUST be owned by one component. `pause`, `cancel`,
+`resume`, `confirm`, and `recovery` MUST have distinct, testable semantics.
+Terminal states MUST NOT be overwritten by later workflow nodes. Illegal
+transitions MUST be rejected and recorded with enough context for diagnosis.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### V. Incremental Refactoring
+
+Large modules such as Store MUST be refactored through incremental extraction,
+not a big-bang rewrite. Each step MUST address one explicit responsibility,
+preserve externally observable behavior, and pass regression tests before the
+next extraction begins. Every compatibility layer MUST have measurable removal
+criteria.
+
+### VI. Verification Gates
+
+A behavioral change MUST begin with a test that reproduces the current problem
+and fails for the expected reason. After implementation, contributors MUST run
+directly related tests, the complete backend test suite, and any affected
+frontend, Eval, or build checks. Performance or quality improvements MUST NOT
+be claimed without complete experimental evidence.
+
+### VII. Repository Safety
+
+Secrets, real environment configuration, runtime databases, unsanitized user
+data, and temporary or raw evaluation outputs MUST NOT be committed.
+Sanitized, reproducible evaluation summaries and formal reports MAY be
+committed. Batch deletion of files or directories is prohibited; every
+deletion MUST target one explicit file path.
+
+## Engineering Constraints
+
+- Evaluation artifacts MUST distinguish source data, raw run output, derived
+  metrics, and publishable summaries.
+- Evaluation runs MUST record enough configuration and provenance to reproduce
+  the reported result.
+- Runtime-path, state-machine, and Store refactors MUST preserve public
+  contracts unless the active feature specification explicitly approves a
+  migration.
+- Constitution exceptions MUST be documented in the implementation plan's
+  Complexity Tracking table with a reason and a rejected simpler alternative.
+
+## Development Workflow
+
+1. Define independently testable behavior and measurable success criteria in
+   the feature specification.
+2. Complete the Constitution Check before research and repeat it after design.
+3. Add a failing regression or behavior test before changing implementation.
+4. Implement the smallest scoped change that satisfies the specification.
+5. Run all required verification gates and record commands and outcomes.
+6. Review generated reports and documentation so their claims match the
+   evidence before committing.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution takes precedence over conflicting project practices and
+generated feature artifacts. Amendments MUST include the motivation, affected
+principles or sections, migration impact, and synchronized updates to dependent
+templates.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+Version changes follow semantic versioning:
+
+- MAJOR for removal or incompatible redefinition of a governing principle.
+- MINOR for a new principle or materially expanded mandatory guidance.
+- PATCH for clarifications that do not change required behavior.
+
+Every feature plan and code review MUST verify constitutional compliance.
+Unresolved violations block implementation or merge unless explicitly
+documented in Complexity Tracking and approved as part of the feature plan.
+
+**Version**: 1.0.0 | **Ratified**: 2026-06-07 | **Last Amended**: 2026-06-07

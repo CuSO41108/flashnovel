@@ -117,6 +117,21 @@
 - **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
 - **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
 
+For every evaluation or performance criterion, specify the sample scope,
+denominator, source data, calculation method, applicability, known limitations,
+and whether a complete or `partial` run is sufficient for acceptance.
+
+## Evidence & Verification *(mandatory)*
+
+- **Required evidence**: [Tests, complete experiments, reports, or other
+  reproducible evidence required before making the feature's claims]
+- **Verification commands**: [Direct tests, complete backend suite, and affected
+  frontend/Eval/build checks]
+- **Claim boundaries**: [Statements that remain prohibited until complete
+  evidence exists]
+- **Generated artifacts**: [Sanitized summaries that may be committed and raw or
+  temporary outputs that must remain untracked]
+
 ## Assumptions
 
 <!--

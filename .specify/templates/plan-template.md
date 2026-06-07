@@ -40,7 +40,23 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- **Evidence scope**: All planned claims identify the experiment or verification
+  data that will support them; partial results are labelled and bounded.
+- **Metric provenance**: Every affected metric defines its denominator, data
+  source, calculation, applicability, and limitations.
+- **Execution path**: The design preserves or establishes one official runtime
+  implementation and registration entry point per Tool category.
+- **State ownership**: Run-state changes have one owner, explicit legal
+  transitions, and distinct pause/cancel/resume/confirm/recovery behavior.
+- **Incremental scope**: Refactors isolate one responsibility per step, preserve
+  observable behavior, and define compatibility-layer removal criteria.
+- **Verification**: Behavioral changes include a failing-first test and list
+  related, full-backend, and affected frontend/Eval/build checks.
+- **Repository safety**: The plan does not commit secrets, runtime data, raw
+  evaluation output, or require batch deletion.
+
+Any failed gate MUST be resolved before Phase 0 or documented in Complexity
+Tracking with an explicit justification.
 
 ## Project Structure
 
