@@ -12,6 +12,16 @@
 - SSE 事件流：输出节点、工具、LLM delta、错误和 checkpoint
 - 断点恢复：run/checkpoint/pending state 持久化
 
+## Web 端演示
+
+工作台可创建故事并启动章节生成，实时展示 Agent 工作流节点、运行事件和生成状态。
+
+![FlashNovel Web 工作台运行事件](docs/images/flashnovel-run-events.png)
+
+章节提交后，可在工作台中查看生成正文、Artifact 以及结构化记忆视图。
+
+![FlashNovel Web 工作台记忆视图](docs/images/flashnovel-memory-view.png)
+
 ## 本地运行
 
 后端会自动读取项目根目录的 `.env`。首次运行前，复制 `.env.example` 为 `.env`，并把 `FLASHNOVEL_API_KEY` 填成你的真实 key；如果不想安装本项目，也可以继续在当前终端设置 `PYTHONPATH`。
