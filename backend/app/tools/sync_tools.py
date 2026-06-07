@@ -32,13 +32,16 @@ def _json_from_text(text: str) -> dict[str, Any]:
         raw = "\n".join(lines).strip()
     try:
         data = json.loads(raw)
-    except Exception:
+    except Exception as exc:
         start = raw.find("{")
         end = raw.rfind("}")
         if start >= 0 and end > start:
-            data = json.loads(raw[start : end + 1])
+            try:
+                data = json.loads(raw[start : end + 1])
+            except Exception as nested_exc:
+                return {"_parse_error": str(nested_exc), "_raw_text": raw}
         else:
-            data = {}
+            return {"_parse_error": str(exc), "_raw_text": raw}
     return data if isinstance(data, dict) else {"items": data}
 
 

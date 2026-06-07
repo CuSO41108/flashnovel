@@ -171,3 +171,40 @@ def test_draft_tool_falls_back_to_non_streaming_when_stream_is_empty(tmp_path) -
     assert usage_events
     assert usage_events[0]["payload"]["model"] == "qwen3.6-plus"
     assert usage_events[0]["payload"]["usage"]["total_tokens"] == 12
+
+
+def test_plan_tool_falls_back_when_llm_returns_malformed_json(tmp_path) -> None:
+    from app.llm.client import ChatCompletion
+    from app.memory.store import FlashNovelStore
+    from app.tools.sync_tools import PlanChapterSyncTool
+
+    class MalformedJsonClient:
+        def complete_sync(self, messages, **kwargs):
+            _ = messages, kwargs
+            return ChatCompletion(
+                content='{"title": "第六章", "beats": ["互疑" "规则解释"]',
+                raw={},
+                model="deepseek-v4-flash",
+            )
+
+    store = FlashNovelStore(tmp_path / "flashnovel.sqlite3", tmp_path / "artifacts")
+    store.initialize()
+    story = store.create_story("坏 JSON 测试", "结构化输出可能坏掉", story_id="story_bad_json")
+    workspace = store.create_workspace(story.id, workspace_id=story.id)
+    run = store.create_run(story_id=story.id, workspace_id=workspace.id, run_id="run_bad_json")
+    tool = PlanChapterSyncTool(store, MalformedJsonClient())
+
+    plan = tool.execute(
+        {
+            "story_id": story.id,
+            "run_id": run.id,
+            "chapter": 6,
+            "seed_prompt": "继续写",
+            "context": {},
+        }
+    )
+
+    assert plan["title"] == "第6章"
+    assert plan["goal"] == "推进主线"
+    assert plan["raw"]["_parse_error"]
+    assert "互疑" in plan["raw"]["_raw_text"]
