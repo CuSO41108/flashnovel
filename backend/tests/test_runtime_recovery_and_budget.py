@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
@@ -208,3 +210,202 @@ def test_plan_tool_falls_back_when_llm_returns_malformed_json(tmp_path) -> None:
     assert plan["goal"] == "推进主线"
     assert plan["raw"]["_parse_error"]
     assert "互疑" in plan["raw"]["_raw_text"]
+
+
+def _tool_store(tmp_path, *, suffix: str):
+    from app.memory.store import FlashNovelStore
+
+    store = FlashNovelStore(
+        tmp_path / f"flashnovel-{suffix}.sqlite3",
+        tmp_path / f"artifacts-{suffix}",
+    )
+    store.initialize()
+    story = store.create_story("调用观测", "记录每次模型请求", story_id=f"story_{suffix}")
+    workspace = store.create_workspace(story.id, workspace_id=story.id)
+    run = store.create_run(
+        story_id=story.id,
+        workspace_id=workspace.id,
+        run_id=f"run_{suffix}",
+    )
+    return store, story, run
+
+
+def _llm_call_events(store, run_id: str):
+    return [
+        event
+        for event in store.list_event_dicts(run_id=run_id)
+        if event["type"] == "llm.call"
+    ]
+
+
+def test_sync_completion_records_llm_call_and_compatible_usage(tmp_path) -> None:
+    from app.llm.client import ChatCompletion, ChatUsage
+    from app.tools.sync_tools import PlanChapterSyncTool
+
+    class Client:
+        def complete_sync(self, messages, **kwargs):
+            _ = messages, kwargs
+            return ChatCompletion(
+                content='{"title": "第一章"}',
+                raw={},
+                model="model-with-usage",
+                usage=ChatUsage(prompt_tokens=8, completion_tokens=3, total_tokens=11),
+            )
+
+    store, story, run = _tool_store(tmp_path, suffix="sync")
+    PlanChapterSyncTool(store, Client()).execute(
+        {
+            "story_id": story.id,
+            "run_id": run.id,
+            "chapter": 1,
+            "context": {},
+        }
+    )
+
+    calls = _llm_call_events(store, run.id)
+    assert len(calls) == 1
+    payload = calls[0]["payload"]
+    assert payload["tool"] == "plan_chapter"
+    assert payload["mode"] == "sync"
+    assert payload["status"] == "completed"
+    assert payload["model"] == "model-with-usage"
+    assert payload["latency_ms"] >= 0
+    assert payload["usage_status"] == "complete"
+    assert payload["usage"]["total_tokens"] == 11
+    assert any(
+        event["type"] == "llm.usage"
+        for event in store.list_event_dicts(run_id=run.id)
+    )
+
+
+def test_sync_completion_without_usage_records_unavailable_not_zero(tmp_path) -> None:
+    from app.llm.client import ChatCompletion
+    from app.tools.sync_tools import PlanChapterSyncTool
+
+    class Client:
+        def complete_sync(self, messages, **kwargs):
+            _ = messages, kwargs
+            return ChatCompletion(content='{"title": "第一章"}', raw={}, model="no-usage")
+
+    store, story, run = _tool_store(tmp_path, suffix="missing_usage")
+    PlanChapterSyncTool(store, Client()).execute(
+        {
+            "story_id": story.id,
+            "run_id": run.id,
+            "chapter": 1,
+            "context": {},
+        }
+    )
+
+    payload = _llm_call_events(store, run.id)[0]["payload"]
+    assert payload["usage_status"] == "unavailable"
+    assert "usage" not in payload
+    assert not any(
+        event["type"] == "llm.usage"
+        for event in store.list_event_dicts(run_id=run.id)
+    )
+
+
+def test_successful_stream_records_one_llm_call(tmp_path) -> None:
+    from app.llm.client import ChatDelta
+    from app.tools.sync_tools import DraftChapterSyncTool
+
+    class Client:
+        def stream_sync(self, messages, **kwargs):
+            _ = messages, kwargs
+            yield ChatDelta(content="第一段", raw={"model": "stream-model"}, model="stream-model")
+            yield ChatDelta(
+                done=True,
+                raw={
+                    "model": "stream-model",
+                    "usage": {
+                        "prompt_tokens": 6,
+                        "completion_tokens": 2,
+                        "total_tokens": 8,
+                    },
+                },
+                model="stream-model",
+            )
+
+    store, story, run = _tool_store(tmp_path, suffix="stream")
+    DraftChapterSyncTool(store, Client()).execute(
+        {
+            "story_id": story.id,
+            "run_id": run.id,
+            "chapter": 1,
+            "context": {},
+            "plan": {},
+        }
+    )
+
+    calls = _llm_call_events(store, run.id)
+    assert len(calls) == 1
+    assert calls[0]["payload"]["mode"] == "stream"
+    assert calls[0]["payload"]["usage_status"] == "complete"
+    assert calls[0]["payload"]["usage"]["total_tokens"] == 8
+
+
+def test_empty_stream_fallback_records_two_actual_requests(tmp_path) -> None:
+    from app.llm.client import ChatCompletion, ChatDelta
+    from app.tools.sync_tools import DraftChapterSyncTool
+
+    class Client:
+        def stream_sync(self, messages, **kwargs):
+            _ = messages, kwargs
+            yield ChatDelta(done=True, model="empty-stream")
+
+        def complete_sync(self, messages, **kwargs):
+            _ = messages, kwargs
+            return ChatCompletion(
+                content="fallback content",
+                raw={},
+                model="fallback-model",
+            )
+
+    store, story, run = _tool_store(tmp_path, suffix="fallback")
+    DraftChapterSyncTool(store, Client()).execute(
+        {
+            "story_id": story.id,
+            "run_id": run.id,
+            "chapter": 1,
+            "context": {},
+            "plan": {},
+        }
+    )
+
+    calls = _llm_call_events(store, run.id)
+    assert len(calls) == 2
+    assert [event["payload"]["mode"] for event in calls] == [
+        "stream",
+        "fallback_after_empty_stream",
+    ]
+
+
+def test_failed_sync_request_records_error_before_reraising(tmp_path) -> None:
+    from app.tools.sync_tools import PlanChapterSyncTool
+
+    class Client:
+        def complete_sync(self, messages, **kwargs):
+            _ = messages, kwargs
+            raise RuntimeError("provider unavailable")
+
+    store, story, run = _tool_store(tmp_path, suffix="failed")
+    tool = PlanChapterSyncTool(store, Client())
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        tool.execute(
+            {
+                "story_id": story.id,
+                "run_id": run.id,
+                "chapter": 1,
+                "context": {},
+            }
+        )
+
+    calls = _llm_call_events(store, run.id)
+    assert len(calls) == 1
+    payload = calls[0]["payload"]
+    assert payload["status"] == "failed"
+    assert payload["error_type"] == "RuntimeError"
+    assert payload["error"] == "provider unavailable"
+    assert payload["usage_status"] == "unavailable"

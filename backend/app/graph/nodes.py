@@ -111,6 +111,7 @@ def check_node(runtime) -> Callable[[GraphState], GraphState]:
             "check_consistency",
             {
                 "story_id": state["story_id"],
+                "run_id": state["run_id"],
                 "chapter": chapter,
                 "draft": state.get("draft", ""),
                 "candidate_memory": state.get("candidate_memory", {}),

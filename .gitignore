@@ -12,6 +12,7 @@ data/
 *.sqlite3-shm
 *.sqlite3-wal
 artifacts/
+eval/results/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/

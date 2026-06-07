@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from app.llm.prompts import (
     CHECK_CONSISTENCY_PROMPT,
@@ -49,9 +51,11 @@ def _messages(template, **kwargs):
     return template.render(kwargs)
 
 
-def _complete_json(client, template, **kwargs) -> dict[str, Any]:
-    result = client.complete_sync(
+def _complete_json(tool, args: dict[str, Any], template, **kwargs) -> dict[str, Any]:
+    result = tool.complete_request(
+        args,
         _messages(template, **kwargs),
+        mode="sync",
         temperature=kwargs.get("temperature"),
         response_format=template.response_format,
     )
@@ -79,23 +83,85 @@ class SyncTool:
     def execute(self, args: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
-    def emit_usage(self, args: dict[str, Any], result: Any, *, mode: str) -> None:
-        usage = _usage_payload(result)
-        run_id = str(args.get("run_id", "") or "")
-        if not run_id or not usage:
+    def complete_request(
+        self,
+        args: dict[str, Any],
+        messages: Any,
+        *,
+        mode: str,
+        **kwargs: Any,
+    ) -> Any:
+        started = perf_counter()
+        try:
+            result = self.client.complete_sync(messages, **kwargs)
+        except Exception as exc:
+            self.record_call(args, mode=mode, started=started, error=exc)
+            raise
+        self.record_call(args, mode=mode, started=started, result=result)
+        return result
+
+    def record_call(
+        self,
+        args: dict[str, Any],
+        *,
+        mode: str,
+        started: float,
+        result: Any = None,
+        model: str | None = None,
+        usage: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        run_id = self._run_id(args)
+        if not run_id:
             return
+        usage_payload = dict(usage or _usage_payload(result))
+        expected_usage = {"prompt_tokens", "completion_tokens", "total_tokens"}
+        if not usage_payload:
+            usage_status = "unavailable"
+        elif expected_usage.issubset(usage_payload):
+            usage_status = "complete"
+        else:
+            usage_status = "incomplete"
+        resolved_model = (
+            model
+            or getattr(result, "model", None)
+            or getattr(getattr(self.client, "config", None), "model", None)
+        )
+        payload: dict[str, Any] = {
+            "message": f"{self.tool_name} llm call",
+            "call_id": str(uuid4()),
+            "tool": self.tool_name,
+            "mode": mode,
+            "model": resolved_model,
+            "status": "failed" if error is not None else "completed",
+            "latency_ms": round((perf_counter() - started) * 1000, 3),
+            "usage_status": usage_status,
+            "error_type": type(error).__name__ if error is not None else None,
+            "error": str(error)[:500] if error is not None else None,
+        }
+        if usage_payload:
+            payload["usage"] = usage_payload
         self.store.append_event(
             run_id=run_id,
-            event_type="llm.usage",
-            payload={
-                "message": f"{self.tool_name} llm usage",
-                "tool": self.tool_name,
-                "mode": mode,
-                "model": getattr(result, "model", None) or getattr(getattr(self.client, "config", None), "model", ""),
-                "usage": usage,
-                "finish_reason": getattr(result, "finish_reason", None),
-            },
+            event_type="llm.call",
+            payload=payload,
         )
+        if usage_payload:
+            self.store.append_event(
+                run_id=run_id,
+                event_type="llm.usage",
+                payload={
+                    "message": f"{self.tool_name} llm usage",
+                    "tool": self.tool_name,
+                    "mode": mode,
+                    "model": resolved_model,
+                    "usage": usage_payload,
+                    "finish_reason": getattr(result, "finish_reason", None),
+                },
+            )
+
+    def _run_id(self, args: dict[str, Any]) -> str:
+        return str(args.get("run_id", "") or "")
 
 
 class NovelContextSyncTool(SyncTool):
@@ -117,7 +183,8 @@ class PlanChapterSyncTool(SyncTool):
         chapter = int(args["chapter"])
         context = args.get("context") or {}
         plan = _complete_json(
-            self.client,
+            self,
+            args,
             PLAN_CHAPTER_PROMPT,
             story_id=story_id,
             chapter=chapter,
@@ -161,8 +228,21 @@ class DraftChapterSyncTool(SyncTool):
             draft_instructions="输出完整中文章节正文，不要解释，不要写大纲。",
         )
         chunks: list[str] = []
+        stream_started = perf_counter()
+        stream_model: str | None = None
+        stream_usage: dict[str, Any] = {}
         try:
             for delta in self.client.stream_sync(messages, temperature=0.7):
+                stream_model = getattr(delta, "model", None) or stream_model
+                raw = getattr(delta, "raw", None)
+                if isinstance(raw, dict) and isinstance(raw.get("usage"), dict):
+                    stream_usage.update(
+                        {
+                            key: value
+                            for key, value in raw["usage"].items()
+                            if value is not None
+                        }
+                    )
                 if delta.done:
                     break
                 if delta.content:
@@ -170,13 +250,36 @@ class DraftChapterSyncTool(SyncTool):
                     if self.emit_delta:
                         self.emit_delta(run_id, delta.content, "content")
             content = "".join(chunks).strip()
-        except Exception:
-            result = self.client.complete_sync(messages, temperature=0.7)
-            self.emit_usage(args, result, mode="fallback_after_stream_error")
+            self.record_call(
+                args,
+                mode="stream",
+                started=stream_started,
+                model=stream_model,
+                usage=stream_usage,
+            )
+        except Exception as exc:
+            self.record_call(
+                args,
+                mode="stream",
+                started=stream_started,
+                model=stream_model,
+                usage=stream_usage,
+                error=exc,
+            )
+            result = self.complete_request(
+                args,
+                messages,
+                mode="fallback_after_stream_error",
+                temperature=0.7,
+            )
             content = result.content.strip()
         if not content:
-            result = self.client.complete_sync(messages, temperature=0.7)
-            self.emit_usage(args, result, mode="fallback_after_empty_stream")
+            result = self.complete_request(
+                args,
+                messages,
+                mode="fallback_after_empty_stream",
+                temperature=0.7,
+            )
             content = result.content.strip()
         if not content:
             raise RuntimeError(f"chapter {chapter} draft is empty")
@@ -192,7 +295,8 @@ class ExtractMemorySyncTool(SyncTool):
         chapter = int(args["chapter"])
         draft = str(args.get("draft") or "")
         memory = _complete_json(
-            self.client,
+            self,
+            args,
             EXTRACT_MEMORY_PROMPT,
             story_id=story_id,
             chapter=chapter,
@@ -225,7 +329,8 @@ class CheckConsistencySyncTool(SyncTool):
 
     def execute(self, args: dict[str, Any]) -> dict[str, Any]:
         report = _complete_json(
-            self.client,
+            self,
+            args,
             CHECK_CONSISTENCY_PROMPT,
             story_id=str(args["story_id"]),
             chapter=int(args["chapter"]),
@@ -246,7 +351,8 @@ class ReviewChapterSyncTool(SyncTool):
     def execute(self, args: dict[str, Any]) -> dict[str, Any]:
         rewrite_count = int(args.get("rewrite_count", 0) or 0)
         report = _complete_json(
-            self.client,
+            self,
+            args,
             REVIEW_CHAPTER_PROMPT,
             story_id=str(args["story_id"]),
             chapter=int(args["chapter"]),
@@ -278,7 +384,8 @@ class RewriteChapterSyncTool(SyncTool):
         rewrite_count = int(args.get("rewrite_count", 0) or 0)
         if rewrite_count > MAX_REWRITES:
             return {"content": str(args.get("draft") or ""), "rewrite_count": rewrite_count, "skipped": True}
-        content = self.client.complete_sync(
+        result = self.complete_request(
+            args,
             _messages(
                 REWRITE_CHAPTER_PROMPT,
                 story_id=str(args["story_id"]),
@@ -289,8 +396,10 @@ class RewriteChapterSyncTool(SyncTool):
                 draft_text=str(args.get("draft") or ""),
                 review_json=_json_text(args.get("review") or {}),
             ),
+            mode="sync",
             temperature=0.55,
-        ).content.strip()
+        )
+        content = result.content.strip()
         self.store.save_artifact(
             story_id=str(args["story_id"]),
             run_id=str(args.get("run_id", "")),
